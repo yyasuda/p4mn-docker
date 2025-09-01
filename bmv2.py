@@ -84,7 +84,7 @@ def watchDog(sw):
                 else:
                     warn("\n*** WARN: switch %s died ☠️ \n" % sw.name)
                     sw.printBmv2Log()
-                    print ("-" * 80) + "\n"
+                    print((("-" * 80) + "\n"))
                     return
     except Exception as e:
         warn("*** ERROR: " + e.message)
@@ -328,7 +328,7 @@ nodes {{
 
     def bmv2Args(self):
         args = ['--device-id %s' % str(self.p4DeviceId)]
-        for port, intf in self.intfs.items():
+        for port, intf in list(self.intfs.items()):
             if not intf.IP():
                 args.append('-i %d@%s' % (port, intf.name))
         if self.thriftPort:
@@ -366,7 +366,7 @@ nodes {{
             result = sock.connect_ex(('localhost', port))
             if result == 0:
                 # No new line
-                print "⚡️ %s @ %d" % (self.targetName, self.grpcPort)
+                print("⚡️ %s @ %d" % (self.targetName, self.grpcPort))
                 # The port is open. Let's go! (Close socket first)
                 sock.close()
                 break
@@ -381,14 +381,14 @@ nodes {{
 
     def printBmv2Log(self):
         if os.path.isfile(self.logfile):
-            print "-" * 80
-            print "%s log (from %s):" % (self.name, self.logfile)
+            print("-" * 80)
+            print("%s log (from %s):" % (self.name, self.logfile))
             with open(self.logfile, 'r') as f:
                 lines = f.readlines()
                 if len(lines) > BMV2_LOG_LINES:
-                    print "..."
+                    print("...")
                 for line in lines[-BMV2_LOG_LINES:]:
-                    print line.rstrip()
+                    print(line.rstrip())
 
     def killBmv2(self, log=False):
         self.stopped = True
@@ -423,3 +423,4 @@ switches = {
     'stratum_bmv2': ONOSStratumSwitch,
 }
 hosts = {'onoshost': ONOSHost}
+

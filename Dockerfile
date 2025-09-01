@@ -13,237 +13,116 @@
 # limitations under the License.
 
 # Default build args.
-ARG GRPC_VER=1.19.0
+ARG GRPC_VER=1.48.2
 ARG PI_COMMIT=main
 ARG BMV2_COMMIT=main
 ARG TAGNAME=latest
-ARG BMV2_CONFIGURE_FLAGS="--with-pi --disable-elogger --without-nanomsg --without-thrift"
+ARG BMV2_CONFIGURE_FLAGS="--with-pi --disable-elogger --without-nanomsg --without-thrift --disable-dependency-tracking"
 ARG PI_CONFIGURE_FLAGS="--with-proto"
 ARG JOBS=2
+ARG BMV2_JOBS=1
 
 # We use a 2-stage build. Build everything then copy only the strict necessary
 # to a new image with runtime dependencies.
-FROM bitnami/minideb:stretch as builder
 
-ENV BUILD_DEPS \
-    autoconf \
-    automake \
-    build-essential \
-    ca-certificates \
-    curl \
-    g++ \
-    git \
-    help2man \
-    libboost-dev \
-    libboost-filesystem-dev \
-    libboost-program-options-dev \
-    libboost-system-dev \
-    libboost-test-dev \
-    libboost-thread-dev \
-    libevent-dev \
-    libgmp-dev \
-    libjudy-dev \
-    libpcap-dev \
-    libssl-dev \
-    libtool \
-    make \
-    pkg-config \
-    python \
-    python-dev \
-    python-pip \
-    python-setuptools \
-    unzip
-RUN install_packages $BUILD_DEPS
-
-# Install extra PIP dependencies
-ENV PIP_DEPS \
-    ipaddress
-RUN pip install --no-cache-dir --root /output $PIP_DEPS
-
-ARG GRPC_VER
+# ========= Builder stage =========
+FROM debian:bookworm-slim AS builder
+ENV DEBIAN_FRONTEND=noninteractive
 ARG JOBS
+ARG BMV2_JOBS
+ENV MAKEFLAGS="-j${JOBS} -l ${JOBS}" \
+    CMAKE_BUILD_PARALLEL_LEVEL="${JOBS}"
 
-# Install protobuf and grpc.
-RUN echo "*** Building gRPC v$GRPC_VER"
-RUN git clone https://github.com/grpc/grpc.git /tmp/grpc && \
-    cd /tmp/grpc && git fetch --tags && git checkout v$GRPC_VER
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential git curl ca-certificates pkg-config \
+    cmake ninja-build autoconf automake libtool \
+    python3 python3-pip python3-setuptools \
+    libboost-dev libboost-filesystem-dev libboost-program-options-dev \
+    libboost-system-dev libboost-thread-dev \
+    libevent-dev libgflags-dev libgmp-dev libjudy-dev \
+    libpcap-dev libreadline-dev zlib1g-dev \
+    libssl-dev protobuf-compiler libprotobuf-dev libprotoc-dev \
+    libc-ares-dev libre2-dev libabsl-dev \
+    help2man groff-base python-is-python3 \
+  && rm -rf /var/lib/apt/lists/*
+
+# ---- gRPC（using system protobuf) ----
+ARG GRPC_VER
+RUN echo "*** Building gRPC v${GRPC_VER} on bookworm (system protobuf)"
+RUN git clone --depth=1 -b v${GRPC_VER} https://github.com/grpc/grpc.git /tmp/grpc
 WORKDIR /tmp/grpc
-RUN git submodule update --init --recursive
 
-WORKDIR third_party/protobuf
-RUN ./autogen.sh
-RUN ./configure --enable-shared
-RUN make -j$JOBS
-RUN make install-strip
-RUN ldconfig
+RUN cmake -B build -G Ninja \
+      -DgRPC_BUILD_TESTS=OFF \
+      -DgRPC_INSTALL=ON \
+      -DgRPC_PROTOBUF_PROVIDER=package \
+      -DgRPC_SSL_PROVIDER=package \
+      -DgRPC_CARES_PROVIDER=package \
+      -DgRPC_ZLIB_PROVIDER=package \
+      -DgRPC_RE2_PROVIDER=package \
+      -DgRPC_ABSL_PROVIDER=package \
+      -DCMAKE_BUILD_TYPE=Release
+RUN cmake --build build -- -j${JOBS}
+RUN cmake --install build
 
-WORKDIR /tmp/grpc
-RUN make -j$JOBS
-RUN make install
-RUN ldconfig
-
+# ---- PI ----
 ARG PI_COMMIT
-ARG PI_CONFIGURE_FLAGS
-
-# Build PI
 RUN echo "*** Building PI $PI_COMMIT - $PI_CONFIGURE_FLAGS"
-RUN git clone https://github.com/p4lang/PI.git /tmp/PI && \
-    cd /tmp/PI && git checkout ${PI_COMMIT}
+RUN git clone https://github.com/p4lang/PI.git /tmp/PI && cd /tmp/PI && git checkout ${PI_COMMIT}
 WORKDIR /tmp/PI
-RUN git submodule update --init --recursive
-RUN ./autogen.sh
-RUN ./configure $PI_CONFIGURE_FLAGS
+RUN ./autogen.sh && git submodule update --init --recursive
+ARG PI_CONFIGURE_FLAGS
+RUN ./configure ${PI_CONFIGURE_FLAGS}
 RUN make -j${JOBS}
 RUN make install
-RUN ldconfig
 
+# ---- bmv2 ----
 ARG BMV2_COMMIT
-ARG BMV2_CONFIGURE_FLAGS
-
-# Build simple_switch
 RUN echo "*** Building BMv2 $BMV2_COMMIT - $BMV2_CONFIGURE_FLAGS"
-RUN git clone https://github.com/p4lang/behavioral-model.git /tmp/bmv2 && \
-    cd /tmp/bmv2 && git checkout ${BMV2_COMMIT}
+RUN git clone https://github.com/p4lang/behavioral-model.git /tmp/bmv2 && cd /tmp/bmv2 && git checkout ${BMV2_COMMIT}
 WORKDIR /tmp/bmv2
 RUN ./autogen.sh
-# Build only simple_switch and simple_switch_grpc
-RUN ./configure $BMV2_CONFIGURE_FLAGS \
-    --without-targets CPPFLAGS="-I${PWD}/targets/simple_switch -DWITH_SIMPLE_SWITCH"
-RUN make -j${JOBS}
-RUN make install
-RUN ldconfig
-
-WORKDIR /tmp/bmv2/targets/simple_switch
-RUN make -j${JOBS}
-RUN make install
-RUN ldconfig
-
-ARG TAGNAME
-
-WORKDIR /tmp/bmv2/targets/simple_switch_grpc
-
-RUN if echo ${TAGNAME} | grep -v "latest"; then ./autogen.sh; fi
-RUN if echo ${TAGNAME} | grep -v "latest"; then ./configure; fi
-RUN make -j${JOBS}
-RUN make install
-RUN ldconfig
-
-# Build Mininet
-RUN echo "*** Building Mininet"
-RUN mkdir /tmp/mininet
-WORKDIR /tmp/mininet
-RUN curl -L https://github.com/mininet/mininet/tarball/master | \
-    tar xz --strip-components 1
-# Install in a special directory that we will copy to the runtime image.
-RUN mkdir -p /output
-RUN PREFIX=/output make install-mnexec install-manpages
-RUN python setup.py install --root /output
-# Install `m` utility so user can attach to a mininet host directly
-RUN cp util/m /output/bin/m && sed -i 's#sudo##g' /output/bin/m
-
-# From `ldd /usr/local/bin/simple_switch_grpc`, we put aside just the strict
-# necessary to run simple_switch_grpc, i.e. the binary and some (not all) of the
-# shared objects we just built. Other shared objects (such as boost) will be
-# installed via apt-get.
-RUN mkdir -p /output/usr/local/bin
-RUN mkdir -p /output/usr/local/lib
-
-RUN cp --parents /usr/local/bin/simple_switch_grpc /output
-
-# Protobuf
-RUN cp --parents --preserve=links /usr/local/lib/libprotobuf.so.* /output
-# gRPC
-RUN cp --parents --preserve=links /usr/local/lib/libgpr.so.* /output
-RUN cp --parents --preserve=links /usr/local/lib/libgrpc++.so.* /output
-RUN cp --parents --preserve=links /usr/local/lib/libgrpc++_reflection.so.* /output
-RUN cp --parents --preserve=links /usr/local/lib/libgrpc.so.* /output
-# PI
-RUN cp --parents --preserve=links /usr/local/lib/libpi.so.* /output
-RUN cp --parents --preserve=links /usr/local/lib/libpiconvertproto.so.* /output
-RUN cp --parents --preserve=links /usr/local/lib/libpifecpp.so.* /output
-RUN cp --parents --preserve=links /usr/local/lib/libpifeproto.so.* /output
-RUN cp --parents --preserve=links /usr/local/lib/libpigrpcserver.so.* /output
-RUN cp --parents --preserve=links /usr/local/lib/libpip4info.so.* /output
-RUN cp --parents --preserve=links /usr/local/lib/libpiprotobuf.so.* /output
-RUN cp --parents --preserve=links /usr/local/lib/libpiprotogrpc.so.* /output
-# BMv2
-RUN cp --parents --preserve=links /usr/local/lib/libbm_grpc_dataplane.so.* /output
-RUN cp --parents --preserve=links /usr/local/lib/libbmpi.so.* /output
-
-# We now install Python bindings to use P4Runtime. This is not required to run
-# Mininet but it's useful for running Python scripts using P4Runtime, e.g. PTF
-# tests or Python-based control planes. As before, we put the strict necessary
-# in /output.
-
-# Protobuf
-WORKDIR /tmp/grpc/third_party/protobuf/python
-RUN python setup.py install --root /output --cpp_implementation
-
-# gRPC
-WORKDIR /tmp/grpc
-# Install build dependencies from requirements.txt, but not protobuf, that's
-# only required at runtime and we just installed it
-RUN cat requirements.txt | grep -v protobuf | grep -v "#" | xargs pip install
-# Build and install gRPC Python bindings in /output
-RUN GRPC_PYTHON_BUILD_WITH_CYTHON=1 pip install --root /output .
-# Install again requirements in /output for runtime
-RUN cat requirements.txt | grep -v protobuf | grep -v "#" | xargs pip install --ignore-installed --root /output
-
-# Finally, copy to /ouput P4Runtime Python bindings installed by PI...
-RUN cp --parents -r /usr/local/lib/python2.7/dist-packages/p4/* /output
-# ...and Google API ones (e.g. Status) needed by P4Runtime.
-RUN cp --parents -r /usr/local/lib/python2.7/dist-packages/google/* /output
-
-# Final stage, runtime.
-FROM bitnami/minideb:stretch as runtime
-
-LABEL maintainer="Carmelo Cascone <carmelo@opennetworking.org>"
-LABEL description="P4Runtime-enabled Mininet that uses BMv2 simple_switch_grpc as the default switch"
-
-ARG GRPC_VER
-ARG PI_COMMIT
-ARG PI_CONFIGURE_FLAGS
-ARG BMV2_COMMIT
 ARG BMV2_CONFIGURE_FLAGS
+RUN ./configure ${BMV2_CONFIGURE_FLAGS}
+RUN make -j${BMV2_JOBS}
+RUN make install
 
-LABEL grpc-version="$GRPC_VER"
-LABEL pi-commit="$PI_COMMIT"
-LABEL bmv2-commit="$BMV2_COMMIT"
-LABEL pi-configure-flags="$PI_CONFIGURE_FLAGS"
-LABEL bmv2-configure-flags="$BMV2_CONFIGURE_FLAGS"
+# ---- Mininet (Python3) ----
+RUN git clone https://github.com/mininet/mininet.git /tmp/mininet
+WORKDIR /tmp/mininet
+# call python3 instead of python in this Makefile
+RUN sed -i 's/PYTHONPATH=. python /PYTHONPATH=. python3 /g' Makefile
+RUN make install-mnexec install-manpages PREFIX=/usr/local
+RUN python3 setup.py install
 
-# Mininet and BMv2 runtime dependencies.
-ENV RUNTIME_DEPS \
-    iproute2 \
-    iputils-ping \
-    net-tools \
-    ethtool \
-    socat \
-    psmisc \
-    procps \
-    iperf \
-    arping \
-    telnet \
-    python-setuptools \
-    python-pexpect \
-    tcpdump \
-    libboost-filesystem1.62.0 \
-    libboost-program-options1.62.0 \
-    libboost-thread1.62.0 \
-    libjudydebian1 \
-    libgmp10 \
-    libpcap0.8
-RUN install_packages $RUNTIME_DEPS
+RUN ldconfig
 
-COPY --from=builder /output /
+# ========= Runtime stage =========
+FROM debian:bookworm-slim AS runtime
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    iproute2 iputils-ping net-tools ethtool socat psmisc procps iperf3 arping telnet tcpdump \
+    python3 python3-setuptools python3-pexpect \
+    libboost-filesystem1.74.0 libboost-program-options1.74.0 \
+    libboost-system1.74.0 libboost-thread1.74.0 \
+    libevent-2.1-7 libgflags2.2 libgmp10 libjudydebian1 \
+    libpcap0.8 libreadline8 zlib1g libssl3 \
+    libc-ares2 libre2-9 libprotobuf32 libabsl20220623 libprotoc32 \
+  && rm -rf /var/lib/apt/lists/*
+
+# copy objects on builder to /usr/local
+COPY --from=builder /usr/local /usr/local
 RUN ldconfig
 
 WORKDIR /root
-COPY bmv2.py .
-ENV PYTHONPATH $PYTHONPATH:/root
+# place bmv2.py under /root
+COPY bmv2.py /root/bmv2.py
+ENV PYTHONPATH=/root
 
-# Expose one port per switch (gRPC server), hence the number of exposed ports
-# limit the number of switches that can be controlled from an external P4Runtime
-# controller.
+# gRPC ports
 EXPOSE 50001-50999
+
+# keep the original entry point
 ENTRYPOINT ["mn", "--custom", "/root/bmv2.py", "--switch", "simple_switch_grpc", "--host", "onoshost", "--controller", "none"]
+
