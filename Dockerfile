@@ -33,7 +33,9 @@ ARG BMV2_JOBS
 ENV MAKEFLAGS="-j${JOBS} -l ${JOBS}" \
     CMAKE_BUILD_PARALLEL_LEVEL="${JOBS}"
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update
+
+RUN apt-get install -y --no-install-recommends \
     build-essential git curl ca-certificates pkg-config \
     cmake ninja-build autoconf automake libtool \
     python3 python3-pip python3-setuptools \
@@ -45,6 +47,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libc-ares-dev libre2-dev libabsl-dev \
     help2man groff-base python-is-python3 \
   && rm -rf /var/lib/apt/lists/*
+
+# Install extra PIP dependencies
+ENV PIP_DEPS=ipaddress
+RUN pip install --no-cache-dir --root /output $PIP_DEPS
 
 # ---- gRPC（using system protobuf) ----
 ARG GRPC_VER
@@ -67,35 +73,123 @@ RUN cmake --install build
 
 # ---- PI ----
 ARG PI_COMMIT
+ARG PI_CONFIGURE_FLAGS
 RUN echo "*** Building PI $PI_COMMIT - $PI_CONFIGURE_FLAGS"
-RUN git clone https://github.com/p4lang/PI.git /tmp/PI && cd /tmp/PI && git checkout ${PI_COMMIT}
+RUN git clone https://github.com/p4lang/PI.git /tmp/PI && \
+    cd /tmp/PI && git checkout ${PI_COMMIT}
 WORKDIR /tmp/PI
 RUN ./autogen.sh && git submodule update --init --recursive
-ARG PI_CONFIGURE_FLAGS
 RUN ./configure ${PI_CONFIGURE_FLAGS}
 RUN make -j${JOBS}
 RUN make install
 
 # ---- bmv2 ----
 ARG BMV2_COMMIT
+ARG BMV2_CONFIGURE_FLAGS
 RUN echo "*** Building BMv2 $BMV2_COMMIT - $BMV2_CONFIGURE_FLAGS"
-RUN git clone https://github.com/p4lang/behavioral-model.git /tmp/bmv2 && cd /tmp/bmv2 && git checkout ${BMV2_COMMIT}
+RUN git clone https://github.com/p4lang/behavioral-model.git /tmp/bmv2 && \
+    cd /tmp/bmv2 && \
+    git checkout ${BMV2_COMMIT} &&\
+    git submodule update --init --recursive  # for PI submodule
 WORKDIR /tmp/bmv2
 RUN ./autogen.sh
-ARG BMV2_CONFIGURE_FLAGS
-RUN ./configure ${BMV2_CONFIGURE_FLAGS}
-RUN make -j${BMV2_JOBS}
-RUN make install
+# Build only simple_switch and simple_switch_grpc
+RUN ./configure ${BMV2_CONFIGURE_FLAGS} \
+    --without-targets CPPFLAGS="-I${PWD}/targets/simple_switch -DWITH_SIMPLE_SWITCH"
+# do not make from toplevel (we do not need to build psa, pna and some )
+#RUN make -j${BMV2_JOBS}
+#RUN make install
+
+# build jsoncpp first
+RUN set -eux; \
+    cd third_party/jsoncpp; \
+    make -j${BMV2_JOBS:-2} libjson.la 
+# do make PI inside bmv2, to make libbmpi.la in advance
+RUN make -C PI  -j${BMV2_JOBS} && \
+    make -C PI  install && \
+    ldconfig
+RUN make -C src -j${BMV2_JOBS}
+
+# do make simple_switch separately
+WORKDIR /tmp/bmv2/targets/simple_switch
+RUN make -j${BMV2_JOBS} && make install && ldconfig
+
+# generate *.pb.h / *.pb.cc under this directory
+WORKDIR /tmp/bmv2
+ARG BMV2_PROTO_SRC=services/p4/bm/dataplane_interface.proto
+RUN set -eux; \
+  mkdir -p tmp_proto/p4/bm services/cpp_out services/grpc_out; \
+  cp -f "$BMV2_PROTO_SRC" tmp_proto/p4/bm/dataplane_interface.proto; \
+  protoc -I tmp_proto --cpp_out=services/cpp_out p4/bm/dataplane_interface.proto; \
+  protoc -I tmp_proto --grpc_out=services/grpc_out \
+         --plugin=protoc-gen-grpc="$(command -v grpc_cpp_plugin)" \
+         p4/bm/dataplane_interface.proto
+
+# build services (libbm_grpc_dataplane.la) 
+WORKDIR /tmp/bmv2/services
+RUN set -eux; \
+  make -j${BMV2_JOBS:-1} libbm_grpc_dataplane.la; \
+  make install; \
+  ldconfig;
+
+# do make simple_switch_grpc separately
+WORKDIR /tmp/bmv2/targets/simple_switch_grpc
+RUN ./autogen.sh || true
+RUN ./configure
+RUN make -j${BMV2_JOBS} && make install && ldconfig
 
 # ---- Mininet (Python3) ----
 RUN git clone https://github.com/mininet/mininet.git /tmp/mininet
 WORKDIR /tmp/mininet
+# Install in a special directory that we will copy to the runtime image.
+RUN mkdir -p /output
+
 # call python3 instead of python in this Makefile
 RUN sed -i 's/PYTHONPATH=. python /PYTHONPATH=. python3 /g' Makefile
-RUN make install-mnexec install-manpages PREFIX=/usr/local
-RUN python3 setup.py install
+RUN PREFIX=/output/usr/local make install-mnexec install-manpages 
+RUN python3 setup.py install --root /output
+# Install `m` utility so user can attach to a mininet host directly
+RUN install -D -m 0755 util/m /output/usr/local/bin/m && \
+    sed -i 's#sudo##g' /output/usr/local/bin/m
+
+# From `ldd /usr/local/bin/simple_switch_grpc`, we put aside just the strict
+# necessary to run simple_switch_grpc, i.e. the binary and some (not all) of the
+# shared objects we just built. Other shared objects (such as boost) will be
+# installed via apt-get.
+RUN mkdir -p /output/usr/local/bin
+RUN mkdir -p /output/usr/local/lib
+
+RUN cp --parents /usr/local/bin/simple_switch_grpc /output
 
 RUN ldconfig
+
+# Protobuf
+RUN cp --parents --preserve=links /usr/lib/aarch64-linux-gnu/libprotobuf.so.* /output
+# gRPC
+#RUN cp --parents --preserve=links /usr/local/lib/libgpr.so.* /output
+#RUN cp --parents --preserve=links /usr/local/lib/libgrpc++.so.* /output
+#RUN cp --parents --preserve=links /usr/local/lib/libgrpc++_reflection.so.* /output
+#RUN cp --parents --preserve=links /usr/local/lib/libgrpc.so.* /output
+# PI
+RUN cp --parents --preserve=links /usr/local/lib/libpi.so.* /output
+RUN cp --parents --preserve=links /usr/local/lib/libpiconvertproto.so.* /output
+RUN cp --parents --preserve=links /usr/local/lib/libpifecpp.so.* /output
+RUN cp --parents --preserve=links /usr/local/lib/libpifeproto.so.* /output
+RUN cp --parents --preserve=links /usr/local/lib/libpigrpcserver.so.* /output
+RUN cp --parents --preserve=links /usr/local/lib/libpip4info.so.* /output
+RUN cp --parents --preserve=links /usr/local/lib/libpiprotobuf.so.* /output
+RUN cp --parents --preserve=links /usr/local/lib/libpiprotogrpc.so.* /output
+# BMv2
+RUN cp --parents --preserve=links /usr/local/lib/libbm_grpc_dataplane.so.* /output
+RUN cp --parents --preserve=links /usr/local/lib/libbmpi.so.* /output
+
+# delete unnessesary files 
+## RUN find /usr/local/lib -type f \( -name '*.a' -o -name '*.la' \) -delete
+# strip all files
+RUN find /output/usr/local -type f -name '*.so*' -o -perm -111 | xargs -r file | \
+    awk -F: '/ELF/{print $1}' | xargs -r strip --strip-unneeded || true
+
+# FROM builder AS debug
 
 # ========= Runtime stage =========
 FROM debian:bookworm-slim AS runtime
@@ -112,17 +206,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # copy objects on builder to /usr/local
-COPY --from=builder /usr/local /usr/local
+COPY --from=builder /output /
 RUN ldconfig
 
 WORKDIR /root
 # place bmv2.py under /root
-COPY bmv2.py /root/bmv2.py
+COPY bmv2.py .
 ENV PYTHONPATH=/root
 
-# gRPC ports
-EXPOSE 50001-50999
+# FROM builder AS debug
 
-# keep the original entry point
+# Expose one port per switch (gRPC server), hence the number of exposed ports
+# limit the number of switches that can be controlled from an external P4Runtime
+# controller.
+EXPOSE 50001-50999
 ENTRYPOINT ["mn", "--custom", "/root/bmv2.py", "--switch", "simple_switch_grpc", "--host", "onoshost", "--controller", "none"]
 
