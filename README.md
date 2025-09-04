@@ -3,32 +3,20 @@
 Docker image that can execute a Mininet-emulated network of BMv2 virtual
 switches, controlled by an external SDN controller via P4Runtime.
 
-This image was created to facilitate testing of P4Runtime support in the ONOS
-controller, but you can use it without ONOS.
+This image was originally published as **`opennetwork/p4mn`**, and it 
+is still widely used. However, it has not been updated for a long time and is
+based on Debian Stretch, which makes it difficult to build today. 
+This version has been adjusted to build successfully on Debian Bookworm.
 
 To obtain the image:
 
-    docker pull opennetworking/p4mn:<tag>
+    docker pull yutakayasuda/p4mn
 
-## Tags
-
-The image comes in two versions (tags):
-
-* `opennetworking/p4mn:latest` Updated daily and built from the master branch of
-  the [BMv2][BMv2] and [PI][PI] (P4Runtime server implementation) repositories;
-* `opennetworking/p4mn:stable` Built using selected BMv2 and PI versions that
-  are known to work well with ONOS master.
-
-Moreover, each tag is available in a "no-logging" version with disabled logging
-macros in BMv2 to improve packet forwarding performance:
-
-* `opennetworking/p4mn:latest-no-logging`
-* `opennetworking/p4mn:stable-no-logging`
-
-## Status [![Build Status](https://github.com/opennetworkinglab/p4mn-docker/actions/workflows/main.yml/badge.svg)](https://github.com/opennetworkinglab/p4mn-docker/actions/workflows/main.yml)
-
-Images are built daily using [Github Actions][GH Actions] and pushed to
-[Docker Hub][Docker Hub].
+**note**: I have added features to the original image to make logging easier, but 
+otherwise the functionality and operation remain the same. For this 
+reason, this README is largely unchanged from the original.
+For details on the additional features—namely adjusting log levels 
+and capturing packet dumps—see the “logging tips” section.
 
 ## Steps to run p4mn
 
@@ -86,6 +74,21 @@ Example of these files are:
   the same host as the container. If this is not the case, you will need to
   modify the `managementAddress` property in the JSON file, replacing
   `localhost` with the IP address of the host system of the `p4mn` container.
+  
+#### logging tips
+
+BMv2 has several log levels: ‘trace’, ‘debug’, ‘info’, ‘warn’, ‘error’, and ‘off’. In this
+docker image, the default is set to ‘warn’, which does not log every packet. 
+To get more information, you can specify the level as follows;
+
+    docker run ...-e LOGLEVEL=debug -v /tmp/p4mn:/tmp ... opennetworking/p4mn ...
+
+You can also obtain packet dumps sent and received by the switch in pcap format as follows
+
+    docker run ...-e LOGLEVEL=debug -e PKTDUMP=true -v /tmp/p4mn:/tmp ... opennetworking/p4mn ...
+
+The pcap data files are recorded separately for each interface, under /tmp, just 
+like the BMv2 log files.
 
 ### Bash alias
 
