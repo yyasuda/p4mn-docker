@@ -211,14 +211,21 @@ RUN ldconfig
 
 WORKDIR /root
 # place bmv2.py under /root
-COPY bmv2.py .
+COPY bmv2.py /root
 ENV PYTHONPATH=/root
+# place mn wrapper script under /root 
+COPY run-p4mn.sh /root
+RUN chmod +x /root/run-p4mn.sh
 
 # FROM builder AS debug
+
+WORKDIR /tmp
 
 # Expose one port per switch (gRPC server), hence the number of exposed ports
 # limit the number of switches that can be controlled from an external P4Runtime
 # controller.
 EXPOSE 50001-50999
-ENTRYPOINT ["mn", "--custom", "/root/bmv2.py", "--switch", "simple_switch_grpc", "--host", "onoshost", "--controller", "none"]
+
+## ENTRYPOINT ["mn", "--custom", "/root/bmv2.py", "--switch", "simple_switch_grpc", "--host", "onoshost", "--controller", "none"]
+ENTRYPOINT ["/root/run-p4mn.sh"]
 
