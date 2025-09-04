@@ -1,4 +1,6 @@
 # Copyright 2019-present Open Networking Foundation
+# Modifications: © 2025 Yutaka Yasuda – Added loglevel adjustment and packet dump feature.
+#  ( Note that this modification has not been endorsed or approved by ONF )
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -183,13 +185,9 @@ RUN cp --parents --preserve=links /usr/local/lib/libpiprotogrpc.so.* /output
 RUN cp --parents --preserve=links /usr/local/lib/libbm_grpc_dataplane.so.* /output
 RUN cp --parents --preserve=links /usr/local/lib/libbmpi.so.* /output
 
-# delete unnessesary files 
-## RUN find /usr/local/lib -type f \( -name '*.a' -o -name '*.la' \) -delete
 # strip all files
 RUN find /output/usr/local -type f -name '*.so*' -o -perm -111 | xargs -r file | \
     awk -F: '/ELF/{print $1}' | xargs -r strip --strip-unneeded || true
-
-# FROM builder AS debug
 
 # ========= Runtime stage =========
 FROM debian:bookworm-slim AS runtime
@@ -217,8 +215,6 @@ ENV PYTHONPATH=/root
 COPY run-p4mn.sh /root
 RUN chmod +x /root/run-p4mn.sh
 
-# FROM builder AS debug
-
 WORKDIR /tmp
 
 # Expose one port per switch (gRPC server), hence the number of exposed ports
@@ -226,6 +222,5 @@ WORKDIR /tmp
 # controller.
 EXPOSE 50001-50999
 
-## ENTRYPOINT ["mn", "--custom", "/root/bmv2.py", "--switch", "simple_switch_grpc", "--host", "onoshost", "--controller", "none"]
 ENTRYPOINT ["/root/run-p4mn.sh"]
 
