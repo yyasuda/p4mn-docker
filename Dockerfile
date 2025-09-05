@@ -166,7 +166,8 @@ RUN cp --parents /usr/local/bin/simple_switch_grpc /output
 RUN ldconfig
 
 # Protobuf
-RUN cp --parents --preserve=links /usr/lib/aarch64-linux-gnu/libprotobuf.so.* /output
+RUN LIBPROTO=$(ldconfig -p | awk '/libprotobuf\.so/{print $4; exit}') && \
+    cp --parents --preserve=links "$LIBPROTO" /output
 # gRPC
 #RUN cp --parents --preserve=links /usr/local/lib/libgpr.so.* /output
 #RUN cp --parents --preserve=links /usr/local/lib/libgrpc++.so.* /output
@@ -203,8 +204,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libc-ares2 libre2-9 libprotobuf32 libabsl20220623 libprotoc32 \
   && rm -rf /var/lib/apt/lists/*
 
-# copy objects on builder to /usr/local
-COPY --from=builder /output /
+# copy objects on builder to /usr/local 
+COPY --from=builder /output/usr /usr
 RUN ldconfig
 
 WORKDIR /root
