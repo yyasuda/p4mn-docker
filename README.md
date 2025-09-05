@@ -22,7 +22,7 @@ and capturing packet dumps—see the “logging tips” section.
 
 To run the container:
 
-    docker run --privileged --rm -it opennetworking/p4mn [MININET ARGS]
+    docker run --privileged --rm -it yutakayasuda/p4mn [MININET ARGS]
 
 After running this command, you should see the mininet CLI (`mininet>`).
 
@@ -38,7 +38,7 @@ documentation.
 
 For example, to run a linear topology with 3 switches:
 
-    docker run --privileged --rm -it opennetworking/p4mn --topo linear,3
+    docker run --privileged --rm -it yutakayasuda/p4mn --topo linear,3
 
 ### P4Runtime server ports
 
@@ -49,7 +49,7 @@ ports.
 
 For example, when running a topology with 3 switches:
 
-     docker run --privileged --rm -it -p 50001-50003:50001-50003 opennetworking/p4mn --topo linear,3
+     docker run --privileged --rm -it -p 50001-50003:50001-50003 yutakayasuda/p4mn --topo linear,3
 
 ### BMv2 logs and other temporary files
 
@@ -57,7 +57,7 @@ To allow easier access to BMv2 logs and other files, we suggest sharing the
 `/tmp` directory inside the container on the host system using the docker run
 `-v` option, for example:
 
-    docker run ... -v /tmp/p4mn:/tmp ... opennetworking/p4mn ...
+    docker run ... -v /tmp/p4mn:/tmp ... yutakayasuda/p4mn ...
 
 By using this option, during the container execution, a number of files related
 to the execution of the BMv2 switches will be available under `/tmp/p4mn` in the
@@ -81,14 +81,21 @@ BMv2 has several log levels: ‘trace’, ‘debug’, ‘info’, ‘warn’, �
 docker image, the default is set to ‘warn’, which does not log every packet. 
 To get more information, you can specify the level as follows;
 
-    docker run ...-e LOGLEVEL=debug -v /tmp/p4mn:/tmp ... opennetworking/p4mn ...
+    docker run ...-e LOGLEVEL=debug -v /tmp/p4mn:/tmp ... yutakayasuda/p4mn ...
 
-You can also obtain packet dumps sent and received by the switch in pcap format as follows
+You can also obtain packet dumps sent and received by the switch in pcap format 
+as follows;
 
-    docker run ...-e LOGLEVEL=debug -e PKTDUMP=true -v /tmp/p4mn:/tmp ... opennetworking/p4mn ...
+    docker run ...-e LOGLEVEL=debug -e PKTDUMP=true -v /tmp/p4mn:/tmp ... yutakayasuda/p4mn ...
 
 The pcap data files are recorded separately for each interface, under /tmp, just 
 like the BMv2 log files.
+
+By the way, the packet log shows that packets with MAC addresses 33:33:00:00:00:02 
+are flying around. For the P4 experiment with IPv4, those are just noisy. You can 
+Disable IPv6 as follows;
+
+    docker run ...-e LOGLEVEL=debug -e PKTDUMP=true -e IPV6=false -v /tmp/p4mn:/tmp ... yutakayasuda/p4mn ...
 
 ### Bash alias
 
@@ -96,7 +103,7 @@ A convenient way to quickly start the p4mn container is to create an alias in
 your bash profile file (`.bashrc`, `.bash_aliases`, or `.bash_profile`) . For
 example:
 
-    alias p4mn="rm -rf /tmp/p4mn && docker run --privileged --rm -it -v /tmp/p4mn:/tmp -p50001-50030:50001-50030 --name p4mn --hostname p4mn opennetworking/p4mn"
+    alias p4mn="rm -rf /tmp/p4mn && docker run --privileged --rm -it -v /tmp/p4mn:/tmp -p50001-50030:50001-50030 --name p4mn --hostname p4mn yutakayasuda/p4mn"
 
 Then, to run a a simple 1-switch 2-host topology:
 
