@@ -1,6 +1,9 @@
 #
-ls /tmp/s*-eth*.pcap | \
-  xargs -I{} sh -c 'tcpdump -qnr "{}" 2>/dev/null | \
-  sed "s/^/{} /"' | \
+# dump Mininet's packet log in pcap files under /tmp.
+# Apr. 2026, Yutaka Yasuda
+# 
+cd /tmp
+ls s*-eth*.pcap | \
+  xargs -I{} sh -c 'tcpdump -qnr "{}" 2>/dev/null | sed "s/^/{} /"' | \
   sort -k2 | \
-  awk '{printf "%-8s %s\n", substr($1,4,length($1)-8), substr($0,length($1)+3)}'
+  awk '{printf "%-8s %s\n", substr($1,4,length($1)-8), substr($0,length($1)+2)}'
