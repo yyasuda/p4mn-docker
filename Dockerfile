@@ -196,6 +196,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     iproute2 iputils-ping net-tools ethtool socat psmisc procps iperf3 arping telnet tcpdump \
+    vim-tiny curl \
     python3 python3-setuptools python3-pexpect \
     libboost-filesystem1.74.0 libboost-program-options1.74.0 \
     libboost-system1.74.0 libboost-thread1.74.0 \
@@ -215,6 +216,9 @@ ENV PYTHONPATH=/root
 # place mn wrapper script under /root 
 COPY run-p4mn.sh /root
 RUN chmod +x /root/run-p4mn.sh
+# place reform.sh under /tmp for pcap log reforming
+COPY reform.sh /tmp/reform.sh
+RUN chmod +x /tmp/reform.sh
 
 WORKDIR /tmp
 
