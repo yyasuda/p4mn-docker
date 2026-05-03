@@ -89,11 +89,14 @@ as follows;
     docker run ...-e LOGLEVEL=debug -e PKTDUMP=true -v /tmp/p4mn:/tmp ... yutakayasuda/p4mn ...
 
 The pcap data files are recorded separately for each interface, under /tmp, just 
-like the BMv2 log files.
+like the BMv2 log files. The `dump_pcaps` command might be useful for formatting the logs.
 
-By the way, the packet log shows that packets with MAC addresses 33:33:00:00:00:02 
-are flying around. For the P4 experiment with IPv4, those are just noisy. You can 
-Disable IPv6 as follows;
+```bash
+mininet> sh dump_pcaps
+```
+
+By the way, you may find entries in the packet log with the MAC address 33:33:00:00:00:02. In P4 experiments using IPv4, these are simply noise.
+You can disable IPv6 as follows:
 
     docker run ...-e LOGLEVEL=debug -e PKTDUMP=true -e IPV6=false -v /tmp/p4mn:/tmp ... yutakayasuda/p4mn ...
 
