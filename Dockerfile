@@ -216,9 +216,9 @@ ENV PYTHONPATH=/root
 # place mn wrapper script under /root 
 COPY run-p4mn.sh /root
 RUN chmod +x /root/run-p4mn.sh
-# place reform.sh under /tmp for pcap log reforming
-COPY reform.sh /tmp/reform.sh
-RUN chmod +x /tmp/reform.sh
+# place dump_pcaps under /usr/local/bin for pcap log reforming
+COPY dump_pcaps /usr/local/bin
+RUN chmod +x /usr/local/bin/dump_pcaps
 
 WORKDIR /tmp
 
