@@ -1,9 +1,29 @@
-#
+#!/usr/bin/sh
 # dump Mininet's packet log in pcap files under /tmp.
 # Apr. 2026, Yutaka Yasuda
 # 
-cd /tmp
+# cd /tmp
+LOGFILE=".dump_pcap.log"
+TSFILE=".dump_pcap.ts"
+
+OP_ALL=0    # output whole log lines
+for arg in "$@"; do
+  [ "$arg" = "-all" ] && OP_ALL=1
+done
+
+if [ "$OP_ALL" -eq 0 ] && [ -f $TSFILE ]; then
+  TS=`cat $TSFILE`
+else
+  TS="00:00:00.000000"
+fi
+
 ls s*-eth*.pcap | \
   xargs -I{} sh -c 'tcpdump -qnr "{}" 2>/dev/null | sed "s/^/{} /"' | \
   sort -k2 | \
-  awk '{printf "%-8s %s\n", substr($1,4,length($1)-8), substr($0,length($1)+2)}'
+  awk '$2 > ts {print $0}' ts=$TS > $LOGFILE
+awk '{printf "%s %-11s %s\n", $2, substr($1,1,length($1)-5), substr($0,index($0,$3))}' $LOGFILE
+
+TS=`awk '{print $2}' $LOGFILE | tail -1`
+if [ -n "$TS" ]; then
+  echo $TS > $TSFILE
+fi
